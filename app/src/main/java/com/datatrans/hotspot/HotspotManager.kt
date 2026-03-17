@@ -25,23 +25,34 @@ class HotspotManager(context: Context) {
             wifiManager.startLocalOnlyHotspot(object : WifiManager.LocalOnlyHotspotCallback() {
                 override fun onStarted(res: WifiManager.LocalOnlyHotspotReservation) {
                     reservation = res
-                    val config = res.wifiConfiguration
-                        ?: res.softApConfiguration?.let { sac ->
-                            val ssid = sac.ssid ?: "DataTrans"
-                            val pass = sac.passphrase ?: ""
-                            onResult(Result.success(HotspotInfo(ssid, pass, getLocalIpAddress())))
-                            return
-                        }
-                        ?: run {
+
+                    val ssid: String
+                    val pass: String
+
+                    val softApConfig = res.softApConfiguration
+                    if (softApConfig != null) {
+                        ssid = softApConfig.ssid ?: "DataTrans"
+                        pass = softApConfig.passphrase ?: ""
+                    } else {
+                        @Suppress("DEPRECATION")
+                        val wifiConfig = res.wifiConfiguration
+                        if (wifiConfig != null) {
+                            @Suppress("DEPRECATION")
+                            ssid = wifiConfig.SSID ?: "DataTrans"
+                            @Suppress("DEPRECATION")
+                            pass = wifiConfig.preSharedKey ?: ""
+                        } else {
                             onResult(Result.failure(Exception("Failed to get hotspot config")))
                             return
                         }
+                    }
 
-                    @Suppress("DEPRECATION")
-                    val ssid = config.SSID ?: "DataTrans"
-                    @Suppress("DEPRECATION")
-                    val pass = config.preSharedKey ?: ""
-                    onResult(Result.success(HotspotInfo(ssid, pass, getLocalIpAddress())))
+                    // Wait for network interface to come up, then detect IP
+                    Thread {
+                        val ip = waitForHotspotIp()
+                        Log.d("HotspotManager", "Hotspot IP: $ip, SSID: $ssid")
+                        onResult(Result.success(HotspotInfo(ssid, pass, ip)))
+                    }.start()
                 }
 
                 override fun onStopped() {
@@ -62,26 +73,54 @@ class HotspotManager(context: Context) {
         reservation = null
     }
 
-    private fun getLocalIpAddress(): String {
+    private fun waitForHotspotIp(maxRetries: Int = 10, delayMs: Long = 500): String {
+        // Hotspot interface takes a moment to come up, retry until we find it
+        for (i in 0 until maxRetries) {
+            val ip = detectHotspotIp()
+            if (ip != null) return ip
+            try { Thread.sleep(delayMs) } catch (_: InterruptedException) {}
+            Log.d("HotspotManager", "Waiting for hotspot IP... attempt ${i + 1}")
+        }
+        // Fallback: 192.168.49.1 is the standard IP for startLocalOnlyHotspot
+        Log.w("HotspotManager", "Could not detect IP, using fallback 192.168.49.1")
+        return "192.168.49.1"
+    }
+
+    private fun detectHotspotIp(): String? {
         try {
             val interfaces = NetworkInterface.getNetworkInterfaces()
+            // Known hotspot interface names
+            val hotspotNames = listOf("swlan0", "wlan1", "ap0", "softap0")
+            val candidates = mutableListOf<Pair<String, String>>() // iface name -> ip
+
             while (interfaces.hasMoreElements()) {
                 val iface = interfaces.nextElement()
                 if (!iface.isUp || iface.isLoopback) continue
-                // Look for the hotspot interface (commonly swlan0, wlan1, ap0, etc.)
                 val addresses = iface.inetAddresses
                 while (addresses.hasMoreElements()) {
                     val addr = addresses.nextElement()
                     if (addr is Inet4Address && !addr.isLoopbackAddress) {
                         val ip = addr.hostAddress ?: continue
-                        // Prefer 192.168.x.x addresses typical for hotspot
-                        if (ip.startsWith("192.168.")) return ip
+                        Log.d("HotspotManager", "Found interface ${iface.name} with IP $ip")
+                        candidates.add(iface.name to ip)
                     }
                 }
             }
+
+            // Prefer known hotspot interface names
+            for (name in hotspotNames) {
+                candidates.find { it.first == name }?.let { return it.second }
+            }
+
+            // Otherwise prefer 192.168.49.x (LocalOnlyHotspot range)
+            candidates.find { it.second.startsWith("192.168.49.") }?.let { return it.second }
+
+            // Then any 192.168.x.x
+            candidates.find { it.second.startsWith("192.168.") }?.let { return it.second }
+
         } catch (e: Exception) {
-            Log.e("HotspotManager", "Failed to get IP", e)
+            Log.e("HotspotManager", "Failed to detect IP", e)
         }
-        return "192.168.43.1" // Common default for Android hotspot
+        return null
     }
 }
