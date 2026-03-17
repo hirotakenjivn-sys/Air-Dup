@@ -2,8 +2,11 @@ package com.datatrans.ui.screens
 
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
@@ -28,9 +31,9 @@ fun SendScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceBetween
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
         // Header
         Row(
@@ -49,97 +52,125 @@ fun SendScreen(
             }
         }
 
-        // QR code - single, centered
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = "カメラでQRを読み取るだけ",
-                fontSize = 16.sp,
-                color = Color.Gray,
-                textAlign = TextAlign.Center
-            )
+        Spacer(modifier = Modifier.height(16.dp))
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            uiState.wifiQrBitmap?.let { bitmap ->
-                Image(
-                    bitmap = bitmap.asImageBitmap(),
-                    contentDescription = "QR Code",
-                    modifier = Modifier
-                        .size(280.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                )
+        // Step 1: WiFi QR
+        StepCard(step = "1", title = "WiFiに接続") {
+            uiState.wifiQrBitmap?.let { QrImage(it) }
+            uiState.hotspotInfo?.let { info ->
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("SSID: ${info.ssid}", fontSize = 12.sp, color = Color.Gray)
+                Text("Pass: ${info.password}", fontSize = 12.sp, color = Color.Gray)
             }
+        }
 
-            Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
+        // Step 2: Download QR
+        StepCard(step = "2", title = "このQRでダウンロード") {
+            uiState.urlQrBitmap?.let { QrImage(it) }
+            Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "WiFi接続 → 自動でダウンロード開始",
+                text = uiState.downloadUrl,
                 fontSize = 13.sp,
-                color = Color.Gray
+                color = MaterialTheme.colorScheme.primary
             )
+        }
 
-            // Download count
-            if (uiState.downloadCount > 0) {
-                Spacer(modifier = Modifier.height(16.dp))
-                Card(
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = Color(0xFF0F2A1A)
-                    )
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Download count
+        if (uiState.downloadCount > 0) {
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F2A1A))
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Default.Download,
-                            contentDescription = null,
-                            tint = Color(0xFF4ADE80),
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "${uiState.downloadCount}件ダウンロード済み",
-                            fontSize = 14.sp,
-                            color = Color(0xFF4ADE80)
-                        )
-                    }
+                    Icon(
+                        Icons.Default.Download,
+                        contentDescription = null,
+                        tint = Color(0xFF4ADE80),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "${uiState.downloadCount}件ダウンロード済み",
+                        fontSize = 14.sp,
+                        color = Color(0xFF4ADE80)
+                    )
                 }
             }
+            Spacer(modifier = Modifier.height(16.dp))
         }
 
-        // Bottom: info + stop
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally
+        // Info
+        if (uiState.selectedFileNames.isNotEmpty()) {
+            Text(
+                "${uiState.selectedFileNames.size}件の画像を共有中",
+                fontSize = 12.sp,
+                color = Color.Gray
+            )
+        }
+        if (uiState.sharedText != null) {
+            Text("テキストも共有中", fontSize = 12.sp, color = Color.Gray)
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        OutlinedButton(
+            onClick = onStop,
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+            shape = RoundedCornerShape(16.dp)
         ) {
-            if (uiState.selectedFileNames.isNotEmpty()) {
-                Text(
-                    text = "${uiState.selectedFileNames.size}件の画像を共有中",
-                    fontSize = 12.sp,
-                    color = Color.Gray
-                )
-            }
-            if (uiState.sharedText != null) {
-                Text(
-                    text = "テキストも共有中",
-                    fontSize = 12.sp,
-                    color = Color.Gray
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            OutlinedButton(
-                onClick = onStop,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Text("共有を停止")
-            }
+            Text("共有を停止")
         }
     }
+}
+
+@Composable
+private fun StepCard(
+    step: String,
+    title: String,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MaterialTheme.colorScheme.primary),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(step, color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            content()
+        }
+    }
+}
+
+@Composable
+private fun QrImage(bitmap: Bitmap) {
+    Image(
+        bitmap = bitmap.asImageBitmap(),
+        contentDescription = "QR Code",
+        modifier = Modifier
+            .size(220.dp)
+            .clip(RoundedCornerShape(12.dp))
+    )
 }

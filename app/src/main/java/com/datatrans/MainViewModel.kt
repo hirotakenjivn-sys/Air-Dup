@@ -24,6 +24,8 @@ data class UiState(
     val appState: AppState = AppState.IDLE,
     val hotspotInfo: HotspotInfo? = null,
     val wifiQrBitmap: Bitmap? = null,
+    val urlQrBitmap: Bitmap? = null,
+    val downloadUrl: String = "",
     val selectedFileNames: List<String> = emptyList(),
     val sharedText: String? = null,
     val errorMessage: String? = null,
@@ -76,14 +78,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 server.start()
                 webServer = server
 
-                // Single QR code: WiFi connection only
-                // Captive portal will auto-redirect to download page
+                val downloadUrl = "http://${info.ipAddress}:$serverPort"
                 val wifiQr = QrCodeGenerator.generateWifiQr(info.ssid, info.password)
+                val urlQr = QrCodeGenerator.generateUrlQr(downloadUrl)
 
                 _uiState.value = _uiState.value.copy(
                     appState = AppState.READY,
                     hotspotInfo = info,
                     wifiQrBitmap = wifiQr,
+                    urlQrBitmap = urlQr,
+                    downloadUrl = downloadUrl,
                     selectedFileNames = sharedFiles.map { it.name },
                     sharedText = text
                 )
