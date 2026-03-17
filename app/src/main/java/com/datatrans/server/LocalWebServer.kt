@@ -78,7 +78,7 @@ class LocalWebServer(
         val imagePreviews = sharedFiles.mapIndexed { index, file ->
             if (file.mimeType.startsWith("image/")) {
                 """<div class="img-wrap">
-                    <img src="/thumb/$index" data-full="/download/$index" loading="lazy">
+                    <img src="/download/$index" loading="lazy">
                 </div>"""
             } else ""
         }.joinToString("\n")
@@ -122,63 +122,20 @@ class LocalWebServer(
             margin-bottom: 20px;
         }
         .images {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-            gap: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
             margin-bottom: 24px;
         }
         .img-wrap {
             border-radius: 12px;
             overflow: hidden;
             background: #1a1a1a;
-            aspect-ratio: 1;
         }
         .img-wrap img {
             width: 100%;
-            height: 100%;
-            object-fit: cover;
             display: block;
-            -webkit-touch-callout: none;
-            -webkit-user-select: none;
-            user-select: none;
-        }
-        .fullscreen-overlay {
-            display: none;
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0,0,0,0.95);
-            z-index: 100;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-        .fullscreen-overlay.active { display: flex; }
-        .fullscreen-overlay img {
-            max-width: 100%;
-            max-height: 70vh;
-            object-fit: contain;
-            border-radius: 8px;
             -webkit-touch-callout: default;
-        }
-        .fullscreen-hint {
-            color: #60a5fa;
-            font-size: 16px;
-            margin-top: 16px;
-            text-align: center;
-        }
-        .fullscreen-close {
-            position: absolute;
-            top: 16px;
-            right: 16px;
-            background: rgba(255,255,255,0.2);
-            border: none;
-            color: #fff;
-            font-size: 24px;
-            width: 44px;
-            height: 44px;
-            border-radius: 22px;
-            cursor: pointer;
         }
         .text-card {
             background: #1a1a1a;
@@ -202,32 +159,11 @@ class LocalWebServer(
 </head>
 <body>
     <h1>DataTrans</h1>
-    <div class="hint">${imageCount}件の画像 — タップして拡大 → 長押しで写真に保存</div>
+    <div class="hint">${imageCount}件の画像 — 長押しで写真に保存</div>
     <div class="images">$imagePreviews</div>
     $textSection
 
-    <div class="fullscreen-overlay" id="overlay" onclick="closeOverlay(event)">
-        <button class="fullscreen-close" onclick="closeOverlay(event)">✕</button>
-        <img id="fullImg" src="">
-        <div class="fullscreen-hint">画像を長押し →「写真に追加」で保存</div>
-    </div>
-
     <script>
-        // Tap thumbnail to open fullscreen with full-res image
-        document.querySelectorAll('.img-wrap img').forEach(img => {
-            img.addEventListener('click', () => {
-                const src = img.getAttribute('data-full');
-                document.getElementById('fullImg').src = src;
-                document.getElementById('overlay').classList.add('active');
-            });
-        });
-
-        function closeOverlay(e) {
-            if (e.target.id === 'overlay' || e.target.classList.contains('fullscreen-close')) {
-                document.getElementById('overlay').classList.remove('active');
-            }
-        }
-
         // Auto-copy text
         const textEl = document.getElementById('textContent');
         if (textEl) {
