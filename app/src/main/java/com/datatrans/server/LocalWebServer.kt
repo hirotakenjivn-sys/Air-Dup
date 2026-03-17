@@ -12,7 +12,7 @@ class LocalWebServer(
 
     private var sharedFiles: List<SharedFile> = emptyList()
     private var sharedText: String? = null
-    var onDownloadStarted: (() -> Unit)? = null
+    private var serverIp: String = "192.168.49.1"
     var onDownloadCompleted: (() -> Unit)? = null
 
     data class SharedFile(
@@ -30,42 +30,76 @@ class LocalWebServer(
         sharedText = text
     }
 
+    fun setServerIp(ip: String) {
+        serverIp = ip
+    }
+
     override fun serve(session: IHTTPSession): Response {
         val uri = session.uri
+        val host = session.headers["host"] ?: ""
+
+        // Captive portal detection: redirect any non-local requests to our page
+        // iOS: /hotspot-detect.html, captive.apple.com
+        // Android: /generate_204, connectivitycheck.gstatic.com
+        // Windows: /connecttest.txt, msftconnecttest.com
+        if (isCaptivePortalCheck(uri, host)) {
+            return redirectToMainPage()
+        }
 
         return when {
             uri == "/" || uri == "" -> serveMainPage()
             uri.startsWith("/download/") -> serveFile(uri.removePrefix("/download/").toIntOrNull())
             uri == "/text" -> serveTextPage()
-            else -> newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_HTML, "Not found")
+            else -> redirectToMainPage() // Unknown paths -> redirect to main
         }
     }
 
+    private fun isCaptivePortalCheck(uri: String, host: String): Boolean {
+        // iOS
+        if (uri.contains("hotspot-detect") || host.contains("captive.apple.com")) return true
+        // Android
+        if (uri.contains("generate_204") || host.contains("connectivitycheck")) return true
+        // Windows
+        if (uri.contains("connecttest") || host.contains("msftconnecttest")) return true
+        // Generic
+        if (uri.contains("ncsi") || host.contains("msftncsi")) return true
+        // If the host is not our server IP, it's a captive portal check
+        if (host.isNotEmpty() && !host.startsWith(serverIp) && !host.startsWith("localhost")) return true
+        return false
+    }
+
+    private fun redirectToMainPage(): Response {
+        val response = newFixedLengthResponse(
+            Response.Status.REDIRECT,
+            MIME_HTML,
+            "<html><body>Redirecting...</body></html>"
+        )
+        response.addHeader("Location", "http://$serverIp:8080/")
+        return response
+    }
+
     private fun serveMainPage(): Response {
-        val fileLinks = sharedFiles.mapIndexed { index, file ->
+        val imageCount = sharedFiles.count { it.mimeType.startsWith("image/") }
+
+        val imagePreviews = sharedFiles.mapIndexed { index, file ->
             if (file.mimeType.startsWith("image/")) {
-                """<div class="file-card">
-                    <img src="/download/$index" class="preview-img" alt="${escapeHtml(file.name)}">
-                    <div class="name">${escapeHtml(file.name)}</div>
-                    <div class="size">${formatSize(file.size)}</div>
-                    <div class="save-hint">長押しで写真に保存</div>
+                """<div class="img-wrap">
+                    <img src="/download/$index" alt="${escapeHtml(file.name)}">
                 </div>"""
-            } else {
-                """<a href="/download/$index" class="file-card">
-                    <div class="icon">📄</div>
-                    <div class="name">${escapeHtml(file.name)}</div>
-                    <div class="size">${formatSize(file.size)}</div>
-                </a>"""
-            }
+            } else ""
         }.joinToString("\n")
 
         val textSection = if (sharedText != null) {
             """<div class="text-card">
-                <div class="label">共有テキスト</div>
                 <div class="text-content" id="textContent">${escapeHtml(sharedText!!)}</div>
-                <button onclick="copyText()" class="copy-btn">コピー</button>
+                <div class="copied-msg" id="copiedMsg"></div>
             </div>"""
         } else ""
+
+        // Build download links for auto-download JS
+        val downloadLinks = sharedFiles.mapIndexed { index, file ->
+            """{ url: "/download/$index", name: "${escapeJs(file.name)}" }"""
+        }.joinToString(",\n            ")
 
         val html = """<!DOCTYPE html>
 <html lang="ja">
@@ -84,48 +118,41 @@ class LocalWebServer(
         }
         h1 {
             text-align: center;
-            font-size: 24px;
-            margin-bottom: 8px;
+            font-size: 28px;
+            margin-bottom: 24px;
             background: linear-gradient(135deg, #60a5fa, #a78bfa);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
-        .subtitle {
+        .status {
             text-align: center;
-            color: #666;
-            font-size: 14px;
-            margin-bottom: 32px;
+            font-size: 16px;
+            margin-bottom: 24px;
+            padding: 16px;
+            border-radius: 16px;
+            background: #1a1a1a;
         }
-        .files {
+        .status.done {
+            background: #0f2a1a;
+            color: #4ade80;
+        }
+        .status.saving {
+            color: #60a5fa;
+        }
+        .images {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-            gap: 12px;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 8px;
             margin-bottom: 24px;
         }
-        .file-card {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 20px 12px;
+        .img-wrap {
+            border-radius: 12px;
+            overflow: hidden;
             background: #1a1a1a;
-            border-radius: 16px;
-            text-decoration: none;
-            color: #fff;
-            transition: transform 0.15s, background 0.15s;
         }
-        .file-card:active { transform: scale(0.95); background: #252525; }
-        .icon { font-size: 40px; margin-bottom: 8px; }
-        .preview-img {
+        .img-wrap img {
             width: 100%;
-            border-radius: 8px;
-            margin-bottom: 8px;
-        }
-        .name { font-size: 13px; text-align: center; word-break: break-all; }
-        .size { font-size: 11px; color: #888; margin-top: 4px; }
-        .save-hint {
-            font-size: 11px;
-            color: #60a5fa;
-            margin-top: 6px;
+            display: block;
         }
         .text-card {
             background: #1a1a1a;
@@ -133,41 +160,78 @@ class LocalWebServer(
             padding: 20px;
             margin-bottom: 24px;
         }
-        .label { font-size: 12px; color: #888; margin-bottom: 8px; }
         .text-content {
             font-size: 16px;
             line-height: 1.5;
-            margin-bottom: 12px;
             white-space: pre-wrap;
             word-break: break-all;
-        }
-        .copy-btn {
-            background: #60a5fa;
-            color: #000;
-            border: none;
-            border-radius: 12px;
-            padding: 10px 24px;
-            font-size: 14px;
-            font-weight: 600;
             cursor: pointer;
-            width: 100%;
         }
-        .copy-btn:active { opacity: 0.8; }
+        .copied-msg {
+            font-size: 13px;
+            color: #4ade80;
+            margin-top: 8px;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
     <h1>DataTrans</h1>
-    <div class="subtitle">タップしてダウンロード</div>
-    <div class="files">$fileLinks</div>
+    <div class="status saving" id="status">保存中...</div>
+    <div class="images">$imagePreviews</div>
     $textSection
     <script>
-        function copyText() {
-            const text = document.getElementById('textContent').innerText;
-            navigator.clipboard.writeText(text).then(() => {
-                const btn = document.querySelector('.copy-btn');
-                btn.textContent = 'コピーしました ✓';
-                setTimeout(() => btn.textContent = 'コピー', 2000);
+        const files = [
+            $downloadLinks
+        ];
+
+        let completed = 0;
+
+        async function downloadAll() {
+            for (const file of files) {
+                try {
+                    const a = document.createElement('a');
+                    a.href = file.url;
+                    a.download = file.name;
+                    a.style.display = 'none';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    completed++;
+                    // Small delay between downloads to avoid browser blocking
+                    await new Promise(r => setTimeout(r, 500));
+                } catch(e) {
+                    console.error('Download failed:', file.name, e);
+                }
+            }
+            const status = document.getElementById('status');
+            status.textContent = '全て保存されました ✓ (' + completed + '件)';
+            status.className = 'status done';
+        }
+
+        // Auto-copy text if present
+        const textEl = document.getElementById('textContent');
+        if (textEl) {
+            textEl.addEventListener('click', () => {
+                navigator.clipboard.writeText(textEl.innerText).then(() => {
+                    document.getElementById('copiedMsg').textContent = 'コピーしました ✓';
+                });
             });
+            // Auto-copy on load
+            navigator.clipboard.writeText(textEl.innerText).then(() => {
+                document.getElementById('copiedMsg').textContent = 'クリップボードにコピー済み ✓';
+            }).catch(() => {});
+        }
+
+        // Start auto-download after page loads
+        if (files.length > 0) {
+            downloadAll();
+        } else {
+            const status = document.getElementById('status');
+            if (textEl) {
+                status.textContent = 'テキストを共有中';
+                status.className = 'status done';
+            }
         }
     </script>
 </body>
@@ -182,7 +246,6 @@ class LocalWebServer(
         }
 
         val file = sharedFiles[index]
-        onDownloadStarted?.invoke()
 
         return try {
             val inputStream: InputStream = context.contentResolver.openInputStream(file.uri)
@@ -194,13 +257,7 @@ class LocalWebServer(
                 inputStream,
                 file.size
             )
-            // Images: inline display (long-press to save to camera roll)
-            // Other files: download
-            if (file.mimeType.startsWith("image/")) {
-                response.addHeader("Content-Disposition", "inline; filename=\"${file.name}\"")
-            } else {
-                response.addHeader("Content-Disposition", "attachment; filename=\"${file.name}\"")
-            }
+            response.addHeader("Content-Disposition", "attachment; filename=\"${file.name}\"")
             response.addHeader("Cache-Control", "no-cache")
             onDownloadCompleted?.invoke()
             response
@@ -216,6 +273,9 @@ class LocalWebServer(
 
     private fun escapeHtml(s: String): String =
         s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+
+    private fun escapeJs(s: String): String =
+        s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
 
     private fun formatSize(bytes: Long): String = when {
         bytes < 1024 -> "${bytes} B"
