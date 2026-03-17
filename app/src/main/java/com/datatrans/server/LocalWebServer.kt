@@ -128,8 +128,6 @@ class LocalWebServer(
             margin-bottom: 24px;
         }
         .img-wrap {
-            border-radius: 12px;
-            overflow: hidden;
             background: #1a1a1a;
         }
         .img-wrap img {
