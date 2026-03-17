@@ -138,7 +138,9 @@ class LocalWebServer(
             height: 100%;
             object-fit: cover;
             display: block;
-            -webkit-touch-callout: default;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
         }
         .fullscreen-overlay {
             display: none;
