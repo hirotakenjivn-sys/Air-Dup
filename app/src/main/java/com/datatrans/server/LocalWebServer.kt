@@ -43,11 +43,20 @@ class LocalWebServer(
 
     private fun serveMainPage(): Response {
         val fileLinks = sharedFiles.mapIndexed { index, file ->
-            """<a href="/download/$index" class="file-card">
-                <div class="icon">📷</div>
-                <div class="name">${escapeHtml(file.name)}</div>
-                <div class="size">${formatSize(file.size)}</div>
-            </a>"""
+            if (file.mimeType.startsWith("image/")) {
+                """<div class="file-card">
+                    <img src="/download/$index" class="preview-img" alt="${escapeHtml(file.name)}">
+                    <div class="name">${escapeHtml(file.name)}</div>
+                    <div class="size">${formatSize(file.size)}</div>
+                    <div class="save-hint">長押しで写真に保存</div>
+                </div>"""
+            } else {
+                """<a href="/download/$index" class="file-card">
+                    <div class="icon">📄</div>
+                    <div class="name">${escapeHtml(file.name)}</div>
+                    <div class="size">${formatSize(file.size)}</div>
+                </a>"""
+            }
         }.joinToString("\n")
 
         val textSection = if (sharedText != null) {
@@ -106,8 +115,18 @@ class LocalWebServer(
         }
         .file-card:active { transform: scale(0.95); background: #252525; }
         .icon { font-size: 40px; margin-bottom: 8px; }
+        .preview-img {
+            width: 100%;
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
         .name { font-size: 13px; text-align: center; word-break: break-all; }
         .size { font-size: 11px; color: #888; margin-top: 4px; }
+        .save-hint {
+            font-size: 11px;
+            color: #60a5fa;
+            margin-top: 6px;
+        }
         .text-card {
             background: #1a1a1a;
             border-radius: 16px;
@@ -175,7 +194,14 @@ class LocalWebServer(
                 inputStream,
                 file.size
             )
-            response.addHeader("Content-Disposition", "attachment; filename=\"${file.name}\"")
+            // Images: inline display (long-press to save to camera roll)
+            // Other files: download
+            if (file.mimeType.startsWith("image/")) {
+                response.addHeader("Content-Disposition", "inline; filename=\"${file.name}\"")
+            } else {
+                response.addHeader("Content-Disposition", "attachment; filename=\"${file.name}\"")
+            }
+            response.addHeader("Cache-Control", "no-cache")
             onDownloadCompleted?.invoke()
             response
         } catch (e: Exception) {
